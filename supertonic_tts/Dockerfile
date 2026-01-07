@@ -5,20 +5,18 @@ FROM $BUILD_FROM
 # Set working directory
 WORKDIR /opt
 
-# Install system dependencies
-RUN apk add --no-cache \
+# Install system dependencies for Debian
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    py3-pip \
-    py3-numpy \
+    python3-pip \
+    python3-venv \
+    python3-dev \
     git \
     git-lfs \
-    libsndfile \
-    libsndfile-dev \
-    gcc \
-    g++ \
-    musl-dev \
-    python3-dev \
-    linux-headers
+    libsndfile1 \
+    libsndfile1-dev \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create python virtual environment
 RUN python3 -m venv /opt/venv
@@ -28,14 +26,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip
 
 # Install Python dependencies
-# Note: Using compatible versions for Alpine Linux (musllinux)
+# onnxruntime works on Debian (has manylinux wheels)
 RUN pip install --no-cache-dir \
-    onnxruntime \
-    numpy \
-    soundfile \
-    librosa \
-    pyyaml \
-    wyoming
+    onnxruntime>=1.19.0 \
+    numpy>=1.26.0 \
+    soundfile>=0.12.0 \
+    librosa>=0.10.0 \
+    pyyaml>=6.0 \
+    wyoming>=1.5.0
 
 # Clone Supertonic repository (for helper code)
 RUN git clone --depth 1 https://github.com/supertone-inc/supertonic.git /opt/supertonic
