@@ -11,13 +11,15 @@ arch:
 init: false
 startup: services
 boot: auto
-# Wyoming protocol discovery - automatically creates TTS entity
+hassio_api: true
+hassio_role: default
+host_network: true
 discovery:
   - wyoming
+backup_exclude:
+  - "*.onnx"
 map:
   - share:rw
-ports:
-  10300/tcp: null
 options:
   default_language: "fr"
   default_voice: "M4"

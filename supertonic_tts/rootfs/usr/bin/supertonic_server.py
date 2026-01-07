@@ -324,19 +324,26 @@ async def main():
             _LOGGER.error("Zeroconf setup failed: %s", e, exc_info=True)
 
     _LOGGER.info("=" * 60)
-    _LOGGER.info("Wyoming server ready. Waiting for connections...")
+    _LOGGER.info("Wyoming server ready. Starting event loop...")
+    _LOGGER.info("Server instance: %s", type(server).__name__)
+    _LOGGER.info("Server URI: %s", args.uri)
 
-    # Start server (Zeroconf runs in background automatically)
-    await server.run(
-        partial(
-            SupertonicEventHandler,
-            wyoming_info,
-            args,
-            tts_engine,
-            voice_styles,
-            config,
+    try:
+        # Start server (Zeroconf runs in background automatically)
+        await server.run(
+            partial(
+                SupertonicEventHandler,
+                wyoming_info,
+                args,
+                tts_engine,
+                voice_styles,
+                config,
+            )
         )
-    )
+        _LOGGER.info("server.run() exited normally")
+    except Exception as e:
+        _LOGGER.error("server.run() failed: %s", e, exc_info=True)
+        raise
 
 
 if __name__ == "__main__":
