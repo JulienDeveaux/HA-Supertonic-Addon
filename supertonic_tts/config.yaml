@@ -32,4 +32,3 @@ schema:
   volume_boost: "float(1.0,3.0)"
   quality: "int(1,10)"
   debug_logging: "bool"
-image: "ghcr.io/home-assistant/{arch}-addon-supertonic-tts"
