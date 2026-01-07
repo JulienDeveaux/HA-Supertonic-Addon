@@ -28,13 +28,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip
 
 # Install Python dependencies
+# Note: Using compatible versions for Alpine Linux (musllinux)
 RUN pip install --no-cache-dir \
-    onnxruntime==1.19.2 \
-    numpy==1.26.4 \
-    soundfile==0.13.1 \
-    librosa==0.11.0 \
-    pyyaml==6.0.3 \
-    wyoming==1.5.3
+    onnxruntime \
+    numpy \
+    soundfile \
+    librosa \
+    pyyaml \
+    wyoming
 
 # Clone Supertonic repository (for helper code)
 RUN git clone --depth 1 https://github.com/supertone-inc/supertonic.git /opt/supertonic
