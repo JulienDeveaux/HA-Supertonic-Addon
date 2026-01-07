@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
+from wyoming.info import Attribution, Describe, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer, AsyncEventHandler
 from wyoming.tts import Synthesize
 from wyoming.audio import AudioChunk, AudioStop
@@ -76,13 +76,21 @@ class SupertonicEventHandler(AsyncEventHandler):
 
     async def handle_event(self, event: Event) -> bool:
         """Handle a Wyoming protocol event"""
-        if Synthesize.is_type(event.type):
+        _LOGGER.debug("Received event: %s", event.type)
+
+        if Describe.is_type(event.type):
+            # Client is asking for server information
+            _LOGGER.info("Received Describe request, sending Info")
+            await self.write_event(self.wyoming_info.event())
+            return True
+        elif Synthesize.is_type(event.type):
+            # Client wants to synthesize speech
             synthesize = Synthesize.from_event(event)
             await self._handle_synthesize(synthesize)
+            return True
         else:
-            _LOGGER.debug("Unexpected event: %s", event)
-
-        return True
+            _LOGGER.warning("Unexpected event type: %s", event.type)
+            return True
 
     async def _handle_synthesize(self, synthesize: Synthesize):
         """Handle a TTS synthesis request"""
