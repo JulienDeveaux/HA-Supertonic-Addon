@@ -95,7 +95,12 @@ class SupertonicEventHandler(AsyncEventHandler):
     async def _handle_synthesize(self, synthesize: Synthesize):
         """Handle a TTS synthesis request"""
         text = synthesize.text
-        voice = synthesize.voice or self.config.get("default_voice", "M4")
+
+        # Get voice name - synthesize.voice is a SynthesizeVoice object
+        if synthesize.voice:
+            voice = synthesize.voice.name
+        else:
+            voice = self.config.get("default_voice", "M4")
 
         # Extract language from voice spec (e.g., "fr_M4" -> "fr", "M4")
         if "_" in voice:
