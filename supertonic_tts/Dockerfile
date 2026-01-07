@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir \
     soundfile>=0.12.0 \
     librosa>=0.10.0 \
     pyyaml>=6.0 \
-    wyoming>=1.5.0
+    'wyoming[zeroconf]>=1.5.0'
 
 # Clone Supertonic repository (for helper code)
 RUN git clone --depth 1 https://github.com/supertone-inc/supertonic.git /opt/supertonic

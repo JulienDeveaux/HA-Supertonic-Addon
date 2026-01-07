@@ -185,6 +185,11 @@ async def main():
         help="Directory containing Supertonic2 models",
     )
     parser.add_argument(
+        "--zeroconf",
+        action="store_true",
+        help="Enable Zeroconf/mDNS discovery for Home Assistant",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="Enable debug logging",
@@ -275,10 +280,53 @@ async def main():
     )
 
     # Start Wyoming server
+    _LOGGER.info("=" * 60)
     _LOGGER.info("Starting Wyoming server on %s", args.uri)
+
+    # Get hostname for discovery info
+    import socket
+    hostname = socket.gethostname()
+    _LOGGER.info("Hostname: %s", hostname)
 
     server = AsyncServer.from_uri(args.uri)
 
+    # Enable Zeroconf discovery if requested
+    zeroconf = None
+    if args.zeroconf:
+        try:
+            from wyoming.zeroconf import HomeAssistantZeroconf
+            from wyoming.server import AsyncTcpServer
+
+            # Zeroconf only works with TCP servers
+            if isinstance(server, AsyncTcpServer):
+                _LOGGER.info("Enabling Zeroconf/mDNS discovery for Home Assistant")
+
+                # Get port from URI
+                port = 10300  # Default Wyoming TTS port
+
+                zeroconf = HomeAssistantZeroconf(
+                    name="Supertonic2 TTS",
+                    port=port,
+                    host=hostname,
+                )
+
+                _LOGGER.info("Wyoming service advertised as:")
+                _LOGGER.info("  - Name: Supertonic2 TTS")
+                _LOGGER.info("  - Host: %s.local", hostname)
+                _LOGGER.info("  - Port: %d", port)
+                _LOGGER.info("  - Service: _wyoming._tcp.local.")
+                _LOGGER.info("Zeroconf/mDNS advertisement: ENABLED")
+            else:
+                _LOGGER.warning("Zeroconf requires tcp:// URI, skipping discovery")
+        except ImportError:
+            _LOGGER.warning("wyoming[zeroconf] not installed, discovery disabled")
+        except Exception as e:
+            _LOGGER.error("Zeroconf setup failed: %s", e, exc_info=True)
+
+    _LOGGER.info("=" * 60)
+    _LOGGER.info("Wyoming server ready. Waiting for connections...")
+
+    # Start server (Zeroconf runs in background automatically)
     await server.run(
         partial(
             SupertonicEventHandler,

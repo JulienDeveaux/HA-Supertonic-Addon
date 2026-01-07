@@ -21,11 +21,17 @@ bashio::log.info "  Volume Boost: ${VOLUME}x"
 bashio::log.info "  Quality: ${QUALITY}/10"
 bashio::log.info "  Wyoming Protocol: tcp://0.0.0.0:10300"
 
+# Get the addon's hostname for Wyoming discovery
+HOSTNAME=$(hostname)
+bashio::log.info "  Addon Hostname: ${HOSTNAME}"
+bashio::log.info "  Wyoming will advertise as: ${HOSTNAME}.local:10300"
+
 # Build command arguments
 ARGS=(
     --uri "tcp://0.0.0.0:10300"
     --data-dir "/data"
     --models-dir "/opt/supertonic/models"
+    --zeroconf
 )
 
 # Add debug flag if enabled
@@ -33,6 +39,9 @@ if bashio::var.true "${DEBUG}"; then
     bashio::log.info "  Debug Logging: enabled"
     ARGS+=(--debug)
 fi
+
+bashio::log.info ""
+bashio::log.info "Starting Wyoming server with Zeroconf discovery..."
 
 # Run the Wyoming TTS server
 exec python3 /usr/bin/supertonic_server.py "${ARGS[@]}"
