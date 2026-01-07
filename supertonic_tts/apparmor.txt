@@ -7,32 +7,41 @@ profile supertonic_tts flags=(attach_disconnected,mediate_deleted) {
   capability net_bind_service,
   capability setgid,
   capability setuid,
+  capability sys_admin,
+  capability dac_override,
 
-  # S6-Overlay supervision system
-  /init ix,
-  /bin/** ix,
-  /usr/bin/** ix,
-  /run/{s6,s6-rc*,service}/** ix,
-  /package/** ix,
-  /command/** ix,
+  # S6-Overlay supervision system - full access
+  / r,
+  /** rwk,
+  /init rix,
+  /bin/** rix,
+  /sbin/** rix,
+  /usr/bin/** rix,
+  /usr/sbin/** rix,
+  /lib/** rm,
+  /usr/lib/** rm,
+  /run/** rwk,
+  /var/run/** rwk,
+  /package/** rix,
+  /command/** rix,
+  /etc/** r,
   /etc/services.d/** rwix,
-  /etc/cont-init.d/** rwix,
-  /etc/cont-finish.d/** rwix,
-  /run/{,**} rwk,
+  /etc/s6-overlay/** rix,
+  /run/s6/** rwk,
   /dev/tty rw,
 
   # Bashio helper library
-  /usr/lib/bashio/** ix,
+  /usr/lib/bashio/** rix,
   /tmp/** rwk,
 
   # Add-on configuration and data
   /data/** rw,
 
-  # Shared directory access (for potential future features)
+  # Shared directory access
   /share/** rw,
 
-  # Start new profile for Python service
-  /usr/bin/python3 cx -> python3,
+  # Python service - allow both direct execution and child profile
+  /usr/bin/python3* rix,
 
   profile python3 flags=(attach_disconnected,mediate_deleted) {
     #include <abstractions/base>
