@@ -1,0 +1,30 @@
+# https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
+name: Supertonic2 TTS
+version: "1.0.0"
+slug: supertonic_tts
+description: Ultra-fast, on-device text-to-speech powered by Supertonic2 with multilingual support
+url: "https://github.com/home-assistant/addons/tree/main/supertonic_tts"
+arch:
+  - aarch64
+  - amd64
+  - armv7
+init: false
+startup: services
+boot: auto
+map:
+  - share:rw
+ports:
+  8765/tcp: 8765
+options:
+  default_language: "fr"
+  default_voice: "M4"
+  speed: 1.5
+  volume_boost: 2.0
+  quality: 5
+schema:
+  default_language: "list(en|fr|es|pt|ko)"
+  default_voice: "list(M1|M2|M3|M4|M5|F1|F2|F3|F4|F5)"
+  speed: "float(0.5,2.0)"
+  volume_boost: "float(1.0,3.0)"
+  quality: "int(1,10)"
+image: "ghcr.io/home-assistant/{arch}-addon-supertonic-tts"

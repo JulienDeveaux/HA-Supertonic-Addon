@@ -1,0 +1,17 @@
+---
+configuration:
+  default_language:
+    name: Default Language
+    description: Default language for text-to-speech synthesis
+  default_voice:
+    name: Default Voice
+    description: Default voice for speech synthesis (M1-M5 for male, F1-F5 for female)
+  speed:
+    name: Speech Speed
+    description: Speech speed multiplier (1.0 = normal, 1.5 = 50% faster, 2.0 = double speed)
+  volume_boost:
+    name: Volume Boost
+    description: Audio volume amplification (1.0 = no boost, 2.0 = double volume)
+  quality:
+    name: Quality Level
+    description: Quality level for speech synthesis (1 = fastest/lowest, 10 = slowest/highest)

@@ -1,0 +1,4 @@
+# https://developers.home-assistant.io/docs/add-ons/repository
+name: Supertonic2 TTS Add-on Repository
+url: https://github.com/JulienDeveaux/HA-Supertonic-Addon
+maintainer: JulienDeveaux

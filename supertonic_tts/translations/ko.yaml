@@ -1,0 +1,17 @@
+---
+configuration:
+  default_language:
+    name: 기본 언어
+    description: 음성 합성을 위한 기본 언어
+  default_voice:
+    name: 기본 음성
+    description: 음성 합성을 위한 기본 음성 (M1-M5는 남성, F1-F5는 여성)
+  speed:
+    name: 말하기 속도
+    description: 말하기 속도 배수 (1.0 = 보통, 1.5 = 50% 빠름, 2.0 = 두 배 속도)
+  volume_boost:
+    name: 볼륨 증폭
+    description: 오디오 볼륨 증폭 (1.0 = 증폭 없음, 2.0 = 두 배 볼륨)
+  quality:
+    name: 품질 수준
+    description: 음성 합성 품질 수준 (1 = 가장 빠름/가장 낮음, 10 = 가장 느림/가장 높음)

@@ -1,0 +1,106 @@
+#include <tunables/global>
+
+profile supertonic_tts flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  # Capabilities
+  capability net_admin,
+  capability net_bind_service,
+  capability setgid,
+  capability setuid,
+  capability sys_admin,
+  capability sys_resource,
+
+  # S6-Overlay
+  /init ix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /run/{s6,s6-rc*,service}/** ix,
+  /package/** ix,
+  /command/** ix,
+  /etc/services.d/** rwix,
+  /etc/cont-init.d/** rwix,
+  /etc/cont-finish.d/** rwix,
+  /run/{,**} rwk,
+  /dev/tty rw,
+
+  # Bashio
+  /usr/lib/bashio/** ix,
+  /tmp/** rwk,
+
+  # Access to options.json and other files within your addon
+  /data/** rw,
+
+  # Start new profile for service
+  /usr/bin/python3 cx -> python3,
+
+  profile python3 flags=(attach_disconnected,mediate_deleted) {
+    #include <abstractions/base>
+    #include <abstractions/python>
+
+    # Suppress ptrace denials
+    deny ptrace (read),
+
+    # Python
+    /usr/bin/python3* mr,
+    /usr/lib/python3*/** mr,
+
+    # Pip/Python packages
+    /opt/venv/** mr,
+    /opt/venv/lib/python3*/** mr,
+
+    # Supertonic models and code
+    /opt/supertonic/** r,
+    /opt/supertonic/models/** r,
+    /opt/supertonic/py/** r,
+
+    # Temporary files
+    /tmp/** rw,
+    /dev/shm/** rw,
+
+    # Network access for HTTP server
+    network inet stream,
+    network inet6 stream,
+    network inet dgram,
+    network inet6 dgram,
+
+    # Audio output
+    /proc/asound/** r,
+    /dev/snd/** rw,
+
+    # Add-on data
+    /data/** rw,
+
+    # Shared data
+    /share/** rw,
+
+    # SSL certificates
+    /ssl/** r,
+
+    # Allow execution of Python scripts
+    /usr/bin/supertonic_server.py r,
+
+    # System files
+    /etc/hosts r,
+    /etc/resolv.conf r,
+    /etc/nsswitch.conf r,
+    /etc/services r,
+    /etc/passwd r,
+    /etc/group r,
+
+    # Proc filesystem
+    /proc/ r,
+    /proc/sys/kernel/hostname r,
+    /proc/sys/kernel/osrelease r,
+    /proc/*/stat r,
+    /proc/*/status r,
+    /proc/*/cmdline r,
+
+    # Device files
+    /dev/random r,
+    /dev/urandom r,
+    /dev/null rw,
+    /dev/zero rw,
+    /dev/full rw,
+  }
+}

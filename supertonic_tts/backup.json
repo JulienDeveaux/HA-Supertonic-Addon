@@ -1,0 +1,9 @@
+{
+  "exclude": [
+    "*.onnx",
+    "models/**",
+    "/opt/supertonic/models/**",
+    "*.pt",
+    "*.pth"
+  ]
+}

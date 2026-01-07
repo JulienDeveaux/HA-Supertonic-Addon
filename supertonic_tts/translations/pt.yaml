@@ -1,0 +1,17 @@
+---
+configuration:
+  default_language:
+    name: Idioma padrão
+    description: Idioma padrão para síntese de voz
+  default_voice:
+    name: Voz padrão
+    description: Voz padrão para síntese de voz (M1-M5 para masculina, F1-F5 para feminina)
+  speed:
+    name: Velocidade da fala
+    description: Multiplicador de velocidade da fala (1.0 = normal, 1.5 = 50% mais rápido, 2.0 = velocidade dupla)
+  volume_boost:
+    name: Amplificação de volume
+    description: Amplificação do volume de áudio (1.0 = sem amplificação, 2.0 = volume duplo)
+  quality:
+    name: Nível de qualidade
+    description: Nível de qualidade para síntese de voz (1 = mais rápido/mais baixo, 10 = mais lento/mais alto)

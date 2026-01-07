@@ -1,0 +1,23 @@
+#!/usr/bin/with-contenv bashio
+# ==============================================================================
+# Start the Supertonic2 TTS service
+# ==============================================================================
+
+bashio::log.info "Starting Supertonic2 TTS Server..."
+
+# Get configuration
+DEFAULT_LANG=$(bashio::config 'default_language')
+DEFAULT_VOICE=$(bashio::config 'default_voice')
+SPEED=$(bashio::config 'speed')
+VOLUME=$(bashio::config 'volume_boost')
+QUALITY=$(bashio::config 'quality')
+
+bashio::log.info "Configuration:"
+bashio::log.info "  Default Language: ${DEFAULT_LANG}"
+bashio::log.info "  Default Voice: ${DEFAULT_VOICE}"
+bashio::log.info "  Speed: ${SPEED}x"
+bashio::log.info "  Volume Boost: ${VOLUME}x"
+bashio::log.info "  Quality: ${QUALITY}/10"
+
+# Run the TTS server
+exec python3 /usr/bin/supertonic_server.py
