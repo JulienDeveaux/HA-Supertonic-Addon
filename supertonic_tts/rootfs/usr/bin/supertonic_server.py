@@ -288,36 +288,29 @@ async def main():
     hostname = socket.gethostname()
     _LOGGER.info("Hostname: %s", hostname)
 
-    server = AsyncServer.from_uri(args.uri)
-
     # Enable Zeroconf discovery if requested
-    zeroconf = None
+    zeroconf_info = None
     if args.zeroconf:
         try:
-            from wyoming.zeroconf import HomeAssistantZeroconf
-            from wyoming.server import AsyncTcpServer
+            from wyoming.zeroconf import Zeroconf
 
-            # Zeroconf only works with TCP servers
-            if isinstance(server, AsyncTcpServer):
-                _LOGGER.info("Enabling Zeroconf/mDNS discovery for Home Assistant")
+            # Get port from URI
+            port = 10300  # Default Wyoming TTS port
 
-                # Get port from URI
-                port = 10300  # Default Wyoming TTS port
+            _LOGGER.info("Enabling Zeroconf/mDNS discovery for Home Assistant")
 
-                zeroconf = HomeAssistantZeroconf(
-                    name="Supertonic2 TTS",
-                    port=port,
-                    host=hostname,
-                )
+            zeroconf_info = Zeroconf(
+                name="Supertonic2 TTS",
+                port=port,
+                host=hostname,
+            )
 
-                _LOGGER.info("Wyoming service advertised as:")
-                _LOGGER.info("  - Name: Supertonic2 TTS")
-                _LOGGER.info("  - Host: %s.local", hostname)
-                _LOGGER.info("  - Port: %d", port)
-                _LOGGER.info("  - Service: _wyoming._tcp.local.")
-                _LOGGER.info("Zeroconf/mDNS advertisement: ENABLED")
-            else:
-                _LOGGER.warning("Zeroconf requires tcp:// URI, skipping discovery")
+            _LOGGER.info("Wyoming service will be advertised as:")
+            _LOGGER.info("  - Name: Supertonic2 TTS")
+            _LOGGER.info("  - Host: %s (and %s.local)", hostname, hostname)
+            _LOGGER.info("  - Port: %d", port)
+            _LOGGER.info("  - Service: _wyoming._tcp.local.")
+            _LOGGER.info("Zeroconf/mDNS: ENABLED")
         except ImportError:
             _LOGGER.warning("wyoming[zeroconf] not installed, discovery disabled")
         except Exception as e:
@@ -325,18 +318,16 @@ async def main():
 
     _LOGGER.info("=" * 60)
     _LOGGER.info("Wyoming server ready. Starting event loop...")
-    _LOGGER.info("Server instance: %s", type(server).__name__)
     _LOGGER.info("Server URI: %s", args.uri)
 
-    try:
-        # Start Zeroconf discovery first if enabled
-        if zeroconf is not None:
-            _LOGGER.info("Starting Zeroconf service...")
-            await zeroconf.async_start()
-            _LOGGER.info("Zeroconf service started successfully")
+    # Create server with optional Zeroconf
+    server = AsyncServer.from_uri(args.uri)
 
-        # Start server (blocks until shutdown)
-        _LOGGER.info("Starting Wyoming server...")
+    _LOGGER.info("Starting Wyoming server...")
+
+    try:
+        # Start server with Zeroconf (if enabled)
+        # The server handles Zeroconf lifecycle automatically
         await server.run(
             partial(
                 SupertonicEventHandler,
@@ -345,18 +336,13 @@ async def main():
                 tts_engine,
                 voice_styles,
                 config,
-            )
+            ),
+            zeroconf_info,
         )
-        _LOGGER.info("server.run() exited normally")
+        _LOGGER.info("Server exited normally")
     except Exception as e:
-        _LOGGER.error("server.run() failed: %s", e, exc_info=True)
+        _LOGGER.error("Server failed: %s", e, exc_info=True)
         raise
-    finally:
-        # Clean shutdown of Zeroconf
-        if zeroconf is not None:
-            _LOGGER.info("Stopping Zeroconf service...")
-            await zeroconf.async_stop()
-            _LOGGER.info("Zeroconf service stopped")
 
 
 if __name__ == "__main__":
