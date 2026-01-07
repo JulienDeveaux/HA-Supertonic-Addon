@@ -1,9 +1,14 @@
-#!/usr/bin/execlineb -S0
+#!/command/with-contenv bashio
 # ==============================================================================
 # Take down the S6 supervision tree when the service fails
 # ==============================================================================
 
-if { s6-test ${1} -ne 0 }
-if { s6-test ${1} -ne 256 }
+declare exit_code
+exit_code="${1}"
 
-s6-svscanctl -t /var/run/s6/services
+bashio::log.info "Service exited with code ${exit_code}"
+
+if [[ "${exit_code}" -ne 0 ]] && [[ "${exit_code}" -ne 256 ]]; then
+    bashio::log.warning "Service crashed with exit code ${exit_code}"
+    bashio::addon.restart
+fi
