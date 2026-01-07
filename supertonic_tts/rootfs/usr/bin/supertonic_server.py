@@ -290,84 +290,88 @@ async def main():
 
     # Create server
     server = AsyncServer.from_uri(args.uri)
-
-    # Enable Zeroconf discovery if requested
-    aiozc = None
-    service_info = None
-    if args.zeroconf:
-        try:
-            from zeroconf import ServiceInfo
-            from zeroconf.asyncio import AsyncZeroconf
-            import socket as sock
-
-            # Get port from URI
-            port = 10300  # Default Wyoming TTS port
-
-            _LOGGER.info("Enabling Zeroconf/mDNS discovery for Home Assistant")
-
-            # Get local IP address
-            try:
-                # Create a socket to determine the local IP
-                s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-                local_ip_bytes = sock.inet_aton(local_ip)
-            except Exception:
-                # Fallback to 0.0.0.0
-                local_ip = "0.0.0.0"
-                local_ip_bytes = sock.inet_aton(local_ip)
-
-            # Create Zeroconf service info
-            service_name = "Supertonic2 TTS._wyoming._tcp.local."
-            service_type = "_wyoming._tcp.local."
-
-            service_info = ServiceInfo(
-                service_type,
-                service_name,
-                addresses=[local_ip_bytes],
-                port=port,
-                properties={
-                    "name": "Supertonic2 TTS",
-                    "program": "supertonic2",
-                    "domain": "tts",
-                },
-                server=f"{hostname}.local.",
-            )
-
-            # Create AsyncZeroconf instance and register service
-            aiozc = AsyncZeroconf()
-            await aiozc.async_register_service(service_info)
-
-            _LOGGER.info("Wyoming service registered on mDNS:")
-            _LOGGER.info("  - Service: %s", service_type)
-            _LOGGER.info("  - Name: Supertonic2 TTS")
-            _LOGGER.info("  - Host: %s (%s.local)", local_ip, hostname)
-            _LOGGER.info("  - Port: %d", port)
-            _LOGGER.info("Zeroconf/mDNS: ENABLED ✓")
-        except ImportError as ie:
-            _LOGGER.warning("Zeroconf not available: %s", ie)
-            _LOGGER.warning("Install with: pip install zeroconf")
-        except Exception as e:
-            _LOGGER.error("Zeroconf setup failed: %s", e, exc_info=True)
+    _LOGGER.info("Server instance created: %s", type(server).__name__)
 
     _LOGGER.info("=" * 60)
     _LOGGER.info("Wyoming server ready. Starting event loop...")
     _LOGGER.info("Server URI: %s", args.uri)
-    _LOGGER.info("Starting Wyoming server...")
+
+    # Variables for Zeroconf
+    aiozc = None
+    service_info = None
 
     try:
-        # Start server (blocks until shutdown)
-        await server.run(
-            partial(
-                SupertonicEventHandler,
-                wyoming_info,
-                args,
-                tts_engine,
-                voice_styles,
-                config,
-            )
+        _LOGGER.info("Starting Wyoming server (this will block)...")
+        _LOGGER.info("Server will listen on all interfaces (0.0.0.0:10300)")
+
+        # Start server in a way that allows us to also run Zeroconf
+        # We need to start Zeroconf AFTER the server starts listening
+
+        # Create the event handler factory
+        handler_factory = partial(
+            SupertonicEventHandler,
+            wyoming_info,
+            args,
+            tts_engine,
+            voice_styles,
+            config,
         )
+
+        # Start Zeroconf registration if requested
+        if args.zeroconf:
+            try:
+                from zeroconf import ServiceInfo
+                from zeroconf.asyncio import AsyncZeroconf
+                import socket as sock
+
+                port = 10300
+                _LOGGER.info("Enabling Zeroconf/mDNS discovery for Home Assistant")
+
+                # Get local IP address
+                try:
+                    s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+                    s.connect(("8.8.8.8", 80))
+                    local_ip = s.getsockname()[0]
+                    s.close()
+                    local_ip_bytes = sock.inet_aton(local_ip)
+                except Exception:
+                    local_ip = "0.0.0.0"
+                    local_ip_bytes = sock.inet_aton(local_ip)
+
+                service_name = "Supertonic2 TTS._wyoming._tcp.local."
+                service_type = "_wyoming._tcp.local."
+
+                service_info = ServiceInfo(
+                    service_type,
+                    service_name,
+                    addresses=[local_ip_bytes],
+                    port=port,
+                    properties={
+                        "name": "Supertonic2 TTS",
+                        "program": "supertonic2",
+                        "domain": "tts",
+                    },
+                    server=f"{hostname}.local.",
+                )
+
+                aiozc = AsyncZeroconf()
+                await aiozc.async_register_service(service_info)
+
+                _LOGGER.info("Wyoming service registered on mDNS:")
+                _LOGGER.info("  - Service: %s", service_type)
+                _LOGGER.info("  - Name: Supertonic2 TTS")
+                _LOGGER.info("  - Host: %s (%s.local)", local_ip, hostname)
+                _LOGGER.info("  - Port: %d", port)
+                _LOGGER.info("Zeroconf/mDNS: ENABLED ✓")
+            except Exception as e:
+                _LOGGER.error("Zeroconf setup failed: %s", e, exc_info=True)
+
+        _LOGGER.info("=" * 60)
+        _LOGGER.info("Calling server.run() - server should now be listening...")
+
+        # Start the server - this blocks until shutdown
+        await server.run(handler_factory)
+
         _LOGGER.info("Server exited normally")
     except Exception as e:
         _LOGGER.error("Server failed: %s", e, exc_info=True)
