@@ -15,3 +15,6 @@ configuration:
   quality:
     name: Nivel de calidad
     description: Nivel de calidad para la síntesis de voz (1 = más rápido/más bajo, 10 = más lento/más alto)
+  debug_logging:
+    name: Registro de depuración
+    description: Habilitar el registro detallado de depuración para solucionar problemas

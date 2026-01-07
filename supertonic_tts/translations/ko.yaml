@@ -15,3 +15,6 @@ configuration:
   quality:
     name: 품질 수준
     description: 음성 합성 품질 수준 (1 = 가장 빠름/가장 낮음, 10 = 가장 느림/가장 높음)
+  debug_logging:
+    name: 디버그 로깅
+    description: 문제 해결을 위한 상세한 디버그 로깅 활성화

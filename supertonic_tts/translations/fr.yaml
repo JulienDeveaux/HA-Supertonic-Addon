@@ -15,3 +15,6 @@ configuration:
   quality:
     name: Niveau de qualité
     description: Niveau de qualité pour la synthèse vocale (1 = le plus rapide/le plus bas, 10 = le plus lent/le plus élevé)
+  debug_logging:
+    name: Journalisation de débogage
+    description: Activer la journalisation détaillée pour le dépannage

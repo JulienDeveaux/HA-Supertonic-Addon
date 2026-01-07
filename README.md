@@ -1,9 +1,5 @@
 # Home Assistant Supertonic2 TTS Add-on
 
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-![Supports armv7 Architecture][armv7-shield]
-
 Ultra-fast, on-device multilingual text-to-speech powered by Supertonic2 for Home Assistant.
 
 ## About
@@ -246,7 +242,7 @@ Contributions are welcome! Please:
 3. Make your changes
 4. Submit a pull request
 
-For bugs or feature requests, please [open an issue](https://github.com/YOUR_USERNAME/HA-Supertonic-Addon/issues).
+For bugs or feature requests, please [open an issue](https://github.com/JulienDeveaux/HA-Supertonic-Addon/issues).
 
 ## Credits
 

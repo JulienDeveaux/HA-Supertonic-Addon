@@ -1,9 +1,9 @@
 #!/usr/bin/with-contenv bashio
 # ==============================================================================
-# Start the Supertonic2 TTS service
+# Start the Supertonic2 TTS Wyoming Server
 # ==============================================================================
 
-bashio::log.info "Starting Supertonic2 TTS Server..."
+bashio::log.info "Starting Supertonic2 TTS Wyoming Server..."
 
 # Get configuration
 DEFAULT_LANG=$(bashio::config 'default_language')
@@ -11,6 +11,7 @@ DEFAULT_VOICE=$(bashio::config 'default_voice')
 SPEED=$(bashio::config 'speed')
 VOLUME=$(bashio::config 'volume_boost')
 QUALITY=$(bashio::config 'quality')
+DEBUG=$(bashio::config 'debug_logging')
 
 bashio::log.info "Configuration:"
 bashio::log.info "  Default Language: ${DEFAULT_LANG}"
@@ -18,6 +19,20 @@ bashio::log.info "  Default Voice: ${DEFAULT_VOICE}"
 bashio::log.info "  Speed: ${SPEED}x"
 bashio::log.info "  Volume Boost: ${VOLUME}x"
 bashio::log.info "  Quality: ${QUALITY}/10"
+bashio::log.info "  Wyoming Protocol: tcp://0.0.0.0:10300"
 
-# Run the TTS server
-exec python3 /usr/bin/supertonic_server.py
+# Build command arguments
+ARGS=(
+    --uri "tcp://0.0.0.0:10300"
+    --data-dir "/data"
+    --models-dir "/opt/supertonic/models"
+)
+
+# Add debug flag if enabled
+if bashio::var.true "${DEBUG}"; then
+    bashio::log.info "  Debug Logging: enabled"
+    ARGS+=(--debug)
+fi
+
+# Run the Wyoming TTS server
+exec python3 /usr/bin/supertonic_server.py "${ARGS[@]}"

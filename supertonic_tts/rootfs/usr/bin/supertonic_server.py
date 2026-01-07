@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 """
-Supertonic2 TTS HTTP Server for Home Assistant
-Provides text-to-speech API endpoint for HA TTS platform
+Supertonic2 TTS Wyoming Server for Home Assistant
+Provides text-to-speech via Wyoming protocol for automatic discovery
 """
 
+import argparse
+import asyncio
+import logging
 import os
 import sys
-import json
 import tempfile
-import logging
+from functools import partial
 from pathlib import Path
-from flask import Flask, request, send_file, jsonify
+
 import numpy as np
 import soundfile as sf
+
+from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
+from wyoming.server import AsyncServer, AsyncEventHandler
+from wyoming.tts import Synthesize
+from wyoming.audio import AudioChunk, AudioStop
+from wyoming.event import Event
 
 # Add supertonic to path
 SUPERTONIC_PATH = "/opt/supertonic/py"
@@ -21,33 +29,185 @@ sys.path.insert(0, SUPERTONIC_PATH)
 from helper import load_text_to_speech, load_voice_style
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Initialize Flask app
-app = Flask(__name__)
-
-# Global TTS engine and configuration
-tts_engine = None
-config = {}
-voice_styles = {}
+_LOGGER = logging.getLogger(__name__)
 
 # Available languages and voices
-SUPPORTED_LANGUAGES = ["en", "fr", "es", "pt", "ko"]
-SUPPORTED_VOICES = ["M1", "M2", "M3", "M4", "M5", "F1", "F2", "F3", "F4", "F5"]
+SUPPORTED_LANGUAGES = {
+    "en": "English",
+    "fr": "French",
+    "es": "Spanish",
+    "pt": "Portuguese",
+    "ko": "Korean"
+}
+
+SUPPORTED_VOICES = {
+    "M1": "Male Voice 1",
+    "M2": "Male Voice 2",
+    "M3": "Male Voice 3",
+    "M4": "Male Voice 4",
+    "M5": "Male Voice 5",
+    "F1": "Female Voice 1",
+    "F2": "Female Voice 2",
+    "F3": "Female Voice 3",
+    "F4": "Female Voice 4",
+    "F5": "Female Voice 5"
+}
 
 
-def load_configuration():
-    """Load addon configuration from Home Assistant options"""
-    global config
+class SupertonicEventHandler(AsyncEventHandler):
+    """Handle Wyoming protocol events for Supertonic2 TTS"""
 
-    config_file = "/data/options.json"
-    if os.path.exists(config_file):
-        with open(config_file, 'r') as f:
+    def __init__(
+        self,
+        wyoming_info: Info,
+        cli_args: argparse.Namespace,
+        tts_engine,
+        voice_styles: dict,
+        config: dict,
+        *args,
+        **kwargs
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.wyoming_info = wyoming_info
+        self.cli_args = cli_args
+        self.tts_engine = tts_engine
+        self.voice_styles = voice_styles
+        self.config = config
+
+    async def handle_event(self, event: Event) -> bool:
+        """Handle a Wyoming protocol event"""
+        if Synthesize.is_type(event.type):
+            synthesize = Synthesize.from_event(event)
+            await self._handle_synthesize(synthesize)
+        else:
+            _LOGGER.debug("Unexpected event: %s", event)
+
+        return True
+
+    async def _handle_synthesize(self, synthesize: Synthesize):
+        """Handle a TTS synthesis request"""
+        text = synthesize.text
+        voice = synthesize.voice or self.config.get("default_voice", "M4")
+
+        # Extract language from voice spec (e.g., "fr_M4" -> "fr", "M4")
+        if "_" in voice:
+            language, voice_name = voice.split("_", 1)
+        else:
+            # Default language if not specified
+            language = self.config.get("default_language", "fr")
+            voice_name = voice
+
+        _LOGGER.info("Synthesizing: text='%s...', lang=%s, voice=%s",
+                     text[:50], language, voice_name)
+
+        try:
+            # Get parameters
+            speed = self.config.get("speed", 1.5)
+            volume = self.config.get("volume_boost", 2.0)
+            quality = self.config.get("quality", 5)
+
+            # Get voice style
+            if voice_name not in self.voice_styles:
+                _LOGGER.warning("Voice %s not found, using default", voice_name)
+                voice_name = self.config.get("default_voice", "M4")
+
+            style = self.voice_styles[voice_name]
+
+            # Generate speech
+            wav, duration = self.tts_engine(
+                text=text,
+                lang=language,
+                style=style,
+                total_step=int(quality),
+                speed=float(speed)
+            )
+
+            # Extract duration value
+            duration_val = float(duration[0]) if hasattr(duration, '__len__') else float(duration)
+
+            # Trim to actual duration
+            trim_samples = int(self.tts_engine.sample_rate * duration_val)
+            wav_trimmed = wav[0, :trim_samples]
+
+            # Apply volume boost
+            wav_boosted = wav_trimmed * float(volume)
+
+            # Clip to prevent distortion
+            wav_boosted = np.clip(wav_boosted, -1.0, 1.0)
+
+            # Convert to int16 for Wyoming
+            wav_int16 = (wav_boosted * 32767).astype(np.int16)
+
+            _LOGGER.info("Generated audio: duration=%.2fs, samples=%d",
+                        duration_val, len(wav_int16))
+
+            # Send audio in chunks using AsyncEventHandler's write_event method
+            chunk_size = 1024
+            for i in range(0, len(wav_int16), chunk_size):
+                chunk = wav_int16[i:i + chunk_size]
+                chunk_bytes = chunk.tobytes()
+
+                await self.write_event(
+                    AudioChunk(
+                        rate=self.tts_engine.sample_rate,
+                        width=2,  # 16-bit
+                        channels=1,  # mono
+                        audio=chunk_bytes
+                    ).event()
+                )
+
+            # Signal completion
+            await self.write_event(AudioStop().event())
+
+        except Exception as e:
+            _LOGGER.error("TTS synthesis failed: %s", e, exc_info=True)
+            # Send stop event to signal error
+            await self.write_event(AudioStop().event())
+
+
+
+async def main():
+    """Main entry point"""
+    parser = argparse.ArgumentParser(description="Supertonic2 TTS Wyoming Server")
+    parser.add_argument(
+        "--uri",
+        default="tcp://0.0.0.0:10300",
+        help="URI to bind server (e.g. tcp://0.0.0.0:10300)",
+    )
+    parser.add_argument(
+        "--data-dir",
+        default="/data",
+        help="Data directory for configuration",
+    )
+    parser.add_argument(
+        "--models-dir",
+        default="/opt/supertonic/models",
+        help="Directory containing Supertonic2 models",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging",
+    )
+
+    args = parser.parse_args()
+
+    # Configure logging
+    logging.basicConfig(
+        level=logging.DEBUG if args.debug else logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+
+    _LOGGER.info("=== Supertonic2 TTS Wyoming Server Starting ===")
+
+    # Load configuration
+    config = {}
+    options_file = Path(args.data_dir) / "options.json"
+    if options_file.exists():
+        import json
+        with open(options_file, 'r') as f:
             config = json.load(f)
+        _LOGGER.info("Loaded configuration: %s", config)
     else:
         # Default configuration
         config = {
@@ -57,225 +217,85 @@ def load_configuration():
             "volume_boost": 2.0,
             "quality": 5
         }
-
-    logger.info(f"Loaded configuration: {config}")
-    return config
-
-
-def initialize_tts_engine():
-    """Initialize the Supertonic2 TTS engine"""
-    global tts_engine, voice_styles
-
-    onnx_dir = "/opt/supertonic/models/onnx"
-    voices_dir = "/opt/supertonic/models/voice_styles"
-
-    logger.info(f"Loading TTS engine from {onnx_dir}")
-    tts_engine = load_text_to_speech(onnx_dir=onnx_dir, use_gpu=False)
-    logger.info(f"TTS engine loaded successfully (sample rate: {tts_engine.sample_rate} Hz)")
-
-    # Pre-load all voice styles
-    logger.info("Loading voice styles...")
-    for voice in SUPPORTED_VOICES:
-        voice_path = os.path.join(voices_dir, f"{voice}.json")
-        if os.path.exists(voice_path):
-            voice_styles[voice] = load_voice_style([voice_path])
-            logger.info(f"  ✓ Loaded voice: {voice}")
-        else:
-            logger.warning(f"  ✗ Voice file not found: {voice_path}")
-
-    logger.info(f"Loaded {len(voice_styles)} voice styles")
-
-
-def synthesize_speech(text, language=None, voice=None, speed=None, volume=None, quality=None):
-    """
-    Synthesize speech from text using Supertonic2
-
-    Args:
-        text: Text to synthesize
-        language: Language code (en, fr, es, pt, ko)
-        voice: Voice ID (M1-M5, F1-F5)
-        speed: Speech speed multiplier (0.5-2.0)
-        volume: Volume boost multiplier (1.0-3.0)
-        quality: Quality level / denoising steps (1-10)
-
-    Returns:
-        Path to generated audio file
-    """
-    # Use config defaults if not specified
-    language = language or config.get("default_language", "fr")
-    voice = voice or config.get("default_voice", "M4")
-    speed = speed if speed is not None else config.get("speed", 1.5)
-    volume = volume if volume is not None else config.get("volume_boost", 2.0)
-    quality = quality if quality is not None else config.get("quality", 5)
-
-    # Validate parameters
-    if language not in SUPPORTED_LANGUAGES:
-        raise ValueError(f"Unsupported language: {language}")
-
-    if voice not in voice_styles:
-        raise ValueError(f"Unsupported or unavailable voice: {voice}")
-
-    logger.info(f"Synthesizing: text='{text[:50]}...', lang={language}, voice={voice}, speed={speed}, volume={volume}, quality={quality}")
-
-    # Get voice style
-    style = voice_styles[voice]
-
-    # Generate speech
-    wav, duration = tts_engine(
-        text=text,
-        lang=language,
-        style=style,
-        total_step=int(quality),
-        speed=float(speed)
-    )
-
-    # Extract duration value
-    duration_val = float(duration[0]) if hasattr(duration, '__len__') else float(duration)
-    logger.info(f"Generated audio: duration={duration_val:.2f}s")
-
-    # Trim to actual duration
-    trim_samples = int(tts_engine.sample_rate * duration_val)
-    wav_trimmed = wav[0, :trim_samples]
-
-    # Apply volume boost
-    wav_boosted = wav_trimmed * float(volume)
-
-    # Clip to prevent distortion
-    wav_boosted = np.clip(wav_boosted, -1.0, 1.0)
-
-    # Save to temporary file
-    temp_file = tempfile.NamedTemporaryFile(
-        delete=False,
-        suffix='.wav',
-        prefix='supertonic_'
-    )
-    temp_file.close()
-
-    sf.write(temp_file.name, wav_boosted, tts_engine.sample_rate)
-    logger.info(f"Audio saved to: {temp_file.name}")
-
-    return temp_file.name
-
-
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "ok",
-        "service": "Supertonic2 TTS",
-        "languages": SUPPORTED_LANGUAGES,
-        "voices": list(voice_styles.keys())
-    })
-
-
-@app.route('/api/tts', methods=['GET', 'POST'])
-def tts_endpoint():
-    """
-    Main TTS endpoint compatible with Home Assistant TTS platform
-
-    Query parameters (GET) or JSON body (POST):
-        - text: Text to synthesize (required)
-        - language: Language code (optional, defaults to config)
-        - voice: Voice ID (optional, defaults to config)
-        - speed: Speech speed (optional, defaults to config)
-        - volume: Volume boost (optional, defaults to config)
-        - quality: Quality level (optional, defaults to config)
-    """
-    try:
-        # Get parameters from request
-        if request.method == 'POST':
-            data = request.get_json() or {}
-            text = data.get('text') or request.args.get('text')
-        else:
-            text = request.args.get('text')
-            data = request.args
-
-        if not text:
-            return jsonify({"error": "Missing 'text' parameter"}), 400
-
-        # Extract optional parameters
-        language = data.get('language')
-        voice = data.get('voice')
-        speed = data.get('speed')
-        volume = data.get('volume')
-        quality = data.get('quality')
-
-        # Convert string numbers to appropriate types
-        if speed is not None:
-            speed = float(speed)
-        if volume is not None:
-            volume = float(volume)
-        if quality is not None:
-            quality = int(quality)
-
-        # Synthesize speech
-        audio_file = synthesize_speech(
-            text=text,
-            language=language,
-            voice=voice,
-            speed=speed,
-            volume=volume,
-            quality=quality
-        )
-
-        # Send audio file
-        return send_file(
-            audio_file,
-            mimetype='audio/wav',
-            as_attachment=False,
-            download_name='tts_output.wav'
-        )
-
-    except ValueError as e:
-        logger.error(f"Validation error: {e}")
-        return jsonify({"error": str(e)}), 400
-
-    except Exception as e:
-        logger.error(f"TTS error: {e}", exc_info=True)
-        return jsonify({"error": "TTS generation failed", "details": str(e)}), 500
-
-
-@app.route('/api/languages', methods=['GET'])
-def get_languages():
-    """Get list of supported languages"""
-    return jsonify({
-        "languages": SUPPORTED_LANGUAGES,
-        "default": config.get("default_language", "fr")
-    })
-
-
-@app.route('/api/voices', methods=['GET'])
-def get_voices():
-    """Get list of available voices"""
-    language = request.args.get('language')
-    return jsonify({
-        "voices": list(voice_styles.keys()),
-        "default": config.get("default_voice", "M4"),
-        "note": "All voices support all languages"
-    })
-
-
-def main():
-    """Main entry point"""
-    logger.info("=== Supertonic2 TTS Server Starting ===")
-
-    # Load configuration
-    load_configuration()
+        _LOGGER.info("Using default configuration")
 
     # Initialize TTS engine
-    initialize_tts_engine()
+    onnx_dir = Path(args.models_dir) / "onnx"
+    voices_dir = Path(args.models_dir) / "voice_styles"
 
-    # Start Flask server
-    port = int(os.environ.get('PORT', 8765))
-    logger.info(f"Starting HTTP server on port {port}")
+    _LOGGER.info("Loading TTS engine from %s", onnx_dir)
+    tts_engine = load_text_to_speech(onnx_dir=str(onnx_dir), use_gpu=False)
+    _LOGGER.info("TTS engine loaded (sample rate: %d Hz)", tts_engine.sample_rate)
 
-    app.run(
-        host='0.0.0.0',
-        port=port,
-        debug=False,
-        threaded=True
+    # Pre-load all voice styles
+    voice_styles = {}
+    _LOGGER.info("Loading voice styles from %s", voices_dir)
+    for voice_id in SUPPORTED_VOICES.keys():
+        voice_path = voices_dir / f"{voice_id}.json"
+        if voice_path.exists():
+            voice_styles[voice_id] = load_voice_style([str(voice_path)])
+            _LOGGER.info("  ✓ Loaded voice: %s", voice_id)
+        else:
+            _LOGGER.warning("  ✗ Voice file not found: %s", voice_path)
+
+    _LOGGER.info("Loaded %d voice styles", len(voice_styles))
+
+    # Create Wyoming Info with all voices for all languages
+    voices = []
+    for lang_code, lang_name in SUPPORTED_LANGUAGES.items():
+        for voice_id, voice_desc in SUPPORTED_VOICES.items():
+            voices.append(
+                TtsVoice(
+                    name=f"{lang_code}_{voice_id}",
+                    description=f"{lang_name} - {voice_desc}",
+                    attribution=Attribution(
+                        name="Supertone Inc.",
+                        url="https://github.com/supertone-inc/supertonic",
+                    ),
+                    installed=True,
+                    version="2.0.0",
+                    languages=[lang_code],
+                )
+            )
+
+    wyoming_info = Info(
+        tts=[
+            TtsProgram(
+                name="supertonic2",
+                description="Supertonic2 - Ultra-fast, on-device multilingual TTS",
+                attribution=Attribution(
+                    name="Supertone Inc.",
+                    url="https://github.com/supertone-inc/supertonic",
+                ),
+                installed=True,
+                version="2.0.0",
+                voices=voices,
+            )
+        ],
+    )
+
+    # Start Wyoming server
+    _LOGGER.info("Starting Wyoming server on %s", args.uri)
+
+    server = AsyncServer.from_uri(args.uri)
+
+    await server.run(
+        partial(
+            SupertonicEventHandler,
+            wyoming_info,
+            args,
+            tts_engine,
+            voice_styles,
+            config,
+        )
     )
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        _LOGGER.info("Server stopped by user")
+    except Exception as e:
+        _LOGGER.error("Server error: %s", e, exc_info=True)
+        sys.exit(1)
