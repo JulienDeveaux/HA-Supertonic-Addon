@@ -2,10 +2,6 @@
 
 Ultra-fast, on-device text-to-speech for Home Assistant powered by Supertonic2.
 
-![Supports aarch64 Architecture][aarch64-shield]
-![Supports amd64 Architecture][amd64-shield]
-![Supports armv7 Architecture][armv7-shield]
-
 ## About
 
 This add-on brings Supertonic2 TTS to Home Assistant, providing:
@@ -22,16 +18,10 @@ Perfect for home automation announcements, notifications, and accessibility feat
 
 1. Add this repository to your Home Assistant add-on store
 2. Install the "Supertonic2 TTS" add-on
-3. Configure your preferences
+3. Configure your preferences (language, voice, speed, etc.)
 4. Start the add-on
-5. Add TTS platform configuration to `configuration.yaml`
+5. **That's it!** The TTS service is automatically discovered via Wyoming protocol
 
-## Configuration Example
+## Documentation
 
-```yaml
-default_language: "fr"
-default_voice: "M4"
-speed: 1.5
-volume_boost: 2.0
-quality: 5
-```
+For complete documentation, see [DOCS.md](DOCS.md)

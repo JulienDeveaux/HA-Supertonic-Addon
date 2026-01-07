@@ -25,7 +25,7 @@ This repository contains a Home Assistant add-on that brings **Supertonic2 TTS**
 | **Volume Control** | 1.0× to 3.0× amplification |
 | **Quality Levels** | 1-10 (higher = better quality, slightly slower) |
 | **Audio Format** | WAV, 44.1kHz, mono |
-| **API** | REST API compatible with Home Assistant TTS platform |
+| **Protocol** | Wyoming protocol with automatic discovery |
 
 ## Installation
 
@@ -93,89 +93,13 @@ quality: 5                  # 1 - 10
 
 > ⏱️ **Note**: First start takes 2-5 minutes to download models (~250MB)
 
-### 3. Configure Home Assistant
+### 3. Automatic Discovery
 
-Add to your `configuration.yaml`:
+**That's it!** Home Assistant will automatically discover the TTS service via Wyoming protocol.
 
-```yaml
-tts:
-  - platform: rest
-    name: "Supertonic2"
-    base_url: "http://localhost:8765"
-    endpoint: "/api/tts"
-    message_param: "text"
-    language_param: "language"
-```
-
-Restart Home Assistant.
-
-### 4. Test It!
-
-```yaml
-service: tts.speak
-target:
-  entity_id: media_player.living_room
-data:
-  message: "Bonjour, bienvenue à la maison!"
-  language: "fr"
-```
-
-## Usage Examples
-
-### Basic Announcement (French)
-
-```yaml
-automation:
-  - alias: "Welcome Home"
-    trigger:
-      - platform: state
-        entity_id: person.julien
-        to: "home"
-    action:
-      - service: tts.speak
-        target:
-          entity_id: media_player.living_room
-        data:
-          message: "Bienvenue à la maison!"
-          language: "fr"
-```
-
-### Advanced with Custom Settings
-
-```yaml
-service: tts.speak
-target:
-  entity_id: media_player.bedroom
-data:
-  message: "Good morning! It's time to wake up."
-  language: "en"
-  options:
-    voice: "F2"        # Female voice 2
-    speed: 1.3         # 30% faster
-    volume: 2.5        # 2.5× volume
-    quality: 8         # High quality
-```
-
-### Multi-language Household
-
-```yaml
-script:
-  announce_english:
-    sequence:
-      - service: tts.speak
-        data:
-          message: "{{ message }}"
-          language: "en"
-          entity_id: media_player.living_room
-
-  announce_french:
-    sequence:
-      - service: tts.speak
-        data:
-          message: "{{ message }}"
-          language: "fr"
-          entity_id: media_player.living_room
-```
+- The integration appears automatically in **Settings → Devices & Services**
+- Click **Configure** when you see the Wyoming Protocol notification
+- All 50 voices (5 languages × 10 voices) will be available
 
 ## Architecture Support
 
@@ -186,6 +110,16 @@ script:
 | armv7 | ✅ Yes | ARM 32-bit v7 |
 | armhf | ❌ No | Use armv7 instead |
 | i386 | ❌ No | 32-bit x86 not supported |
+
+## Wyoming Protocol
+
+This add-on uses the **Wyoming protocol** for communication with Home Assistant:
+- **Port**: 10300 (TCP)
+- **Protocol**: Wyoming (binary protocol for voice services)
+- **Discovery**: Automatic via Zeroconf/mDNS (`_wyoming._tcp.local.`)
+- **Communication**: Event-based (Describe, Synthesize, AudioChunk, AudioStop)
+
+No REST API or HTTP endpoints are exposed. All communication happens through the Wyoming protocol.
 
 ## Performance Benchmarks
 
@@ -198,27 +132,6 @@ Generation speed examples (Apple M4 Pro):
 | 10 | 17× | High-quality audio |
 
 > **Real-Time Factor (RTF)**: 1× means generation takes the same time as playback. Higher is faster.
-
-## API Endpoints
-
-The add-on exposes a REST API on port 8765:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check and service info |
-| `/api/tts` | GET/POST | Generate TTS audio |
-| `/api/languages` | GET | List supported languages |
-| `/api/voices` | GET | List available voices |
-
-### Example API Call
-
-```bash
-# Generate French TTS
-curl "http://localhost:8765/api/tts?text=Bonjour&language=fr&voice=M4" -o output.wav
-
-# Check health
-curl http://localhost:8765/health
-```
 
 ## System Requirements
 

@@ -26,8 +26,6 @@ This add-on provides a local, privacy-focused text-to-speech service using Super
 4. Start the add-on
 5. **That's it!** Home Assistant will automatically discover the TTS service
 
-No need to edit `configuration.yaml`!
-
 ## Configuration
 
 ### Add-on Configuration
@@ -59,9 +57,8 @@ After starting the add-on, Home Assistant will automatically create TTS entities
 
 ```yaml
 service: tts.speak
-target:
-  entity_id: tts.supertonic2_fr_m4
 data:
+  entity_id: tts.supertonic2_fr_m4
   message: "Bonjour, bienvenue à la maison!"
   media_player_entity_id: media_player.living_room
 ```
@@ -119,8 +116,3 @@ For issues, feature requests, or questions:
 ## Credits
 
 Powered by [Supertonic2](https://github.com/supertone-inc/supertonic) by Supertone Inc.
-
-## License
-
-This add-on is licensed under the Apache 2.0 License.
-Supertonic2 is licensed under the OpenRAIL License.
