@@ -288,46 +288,76 @@ async def main():
     hostname = socket.gethostname()
     _LOGGER.info("Hostname: %s", hostname)
 
+    # Create server
+    server = AsyncServer.from_uri(args.uri)
+
     # Enable Zeroconf discovery if requested
-    zeroconf_info = None
+    aiozc = None
+    service_info = None
     if args.zeroconf:
         try:
-            from wyoming.zeroconf import Zeroconf
+            from zeroconf import ServiceInfo
+            from zeroconf.asyncio import AsyncZeroconf
+            import socket as sock
 
             # Get port from URI
             port = 10300  # Default Wyoming TTS port
 
             _LOGGER.info("Enabling Zeroconf/mDNS discovery for Home Assistant")
 
-            zeroconf_info = Zeroconf(
-                name="Supertonic2 TTS",
+            # Get local IP address
+            try:
+                # Create a socket to determine the local IP
+                s = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+                local_ip_bytes = sock.inet_aton(local_ip)
+            except Exception:
+                # Fallback to 0.0.0.0
+                local_ip = "0.0.0.0"
+                local_ip_bytes = sock.inet_aton(local_ip)
+
+            # Create Zeroconf service info
+            service_name = "Supertonic2 TTS._wyoming._tcp.local."
+            service_type = "_wyoming._tcp.local."
+
+            service_info = ServiceInfo(
+                service_type,
+                service_name,
+                addresses=[local_ip_bytes],
                 port=port,
-                host=hostname,
+                properties={
+                    "name": "Supertonic2 TTS",
+                    "program": "supertonic2",
+                    "domain": "tts",
+                },
+                server=f"{hostname}.local.",
             )
 
-            _LOGGER.info("Wyoming service will be advertised as:")
+            # Create AsyncZeroconf instance and register service
+            aiozc = AsyncZeroconf()
+            await aiozc.async_register_service(service_info)
+
+            _LOGGER.info("Wyoming service registered on mDNS:")
+            _LOGGER.info("  - Service: %s", service_type)
             _LOGGER.info("  - Name: Supertonic2 TTS")
-            _LOGGER.info("  - Host: %s (and %s.local)", hostname, hostname)
+            _LOGGER.info("  - Host: %s (%s.local)", local_ip, hostname)
             _LOGGER.info("  - Port: %d", port)
-            _LOGGER.info("  - Service: _wyoming._tcp.local.")
-            _LOGGER.info("Zeroconf/mDNS: ENABLED")
-        except ImportError:
-            _LOGGER.warning("wyoming[zeroconf] not installed, discovery disabled")
+            _LOGGER.info("Zeroconf/mDNS: ENABLED ✓")
+        except ImportError as ie:
+            _LOGGER.warning("Zeroconf not available: %s", ie)
+            _LOGGER.warning("Install with: pip install zeroconf")
         except Exception as e:
             _LOGGER.error("Zeroconf setup failed: %s", e, exc_info=True)
 
     _LOGGER.info("=" * 60)
     _LOGGER.info("Wyoming server ready. Starting event loop...")
     _LOGGER.info("Server URI: %s", args.uri)
-
-    # Create server with optional Zeroconf
-    server = AsyncServer.from_uri(args.uri)
-
     _LOGGER.info("Starting Wyoming server...")
 
     try:
-        # Start server with Zeroconf (if enabled)
-        # The server handles Zeroconf lifecycle automatically
+        # Start server (blocks until shutdown)
         await server.run(
             partial(
                 SupertonicEventHandler,
@@ -336,13 +366,22 @@ async def main():
                 tts_engine,
                 voice_styles,
                 config,
-            ),
-            zeroconf_info,
+            )
         )
         _LOGGER.info("Server exited normally")
     except Exception as e:
         _LOGGER.error("Server failed: %s", e, exc_info=True)
         raise
+    finally:
+        # Clean shutdown of Zeroconf
+        if aiozc is not None and service_info is not None:
+            _LOGGER.info("Stopping Zeroconf service...")
+            try:
+                await aiozc.async_unregister_service(service_info)
+                await aiozc.async_close()
+                _LOGGER.info("Zeroconf service stopped")
+            except Exception as e:
+                _LOGGER.warning("Error stopping Zeroconf: %s", e)
 
 
 if __name__ == "__main__":
