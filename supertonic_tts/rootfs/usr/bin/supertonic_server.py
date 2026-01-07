@@ -329,7 +329,14 @@ async def main():
     _LOGGER.info("Server URI: %s", args.uri)
 
     try:
-        # Start server (Zeroconf runs in background automatically)
+        # Start Zeroconf discovery first if enabled
+        if zeroconf is not None:
+            _LOGGER.info("Starting Zeroconf service...")
+            await zeroconf.async_start()
+            _LOGGER.info("Zeroconf service started successfully")
+
+        # Start server (blocks until shutdown)
+        _LOGGER.info("Starting Wyoming server...")
         await server.run(
             partial(
                 SupertonicEventHandler,
@@ -344,6 +351,12 @@ async def main():
     except Exception as e:
         _LOGGER.error("server.run() failed: %s", e, exc_info=True)
         raise
+    finally:
+        # Clean shutdown of Zeroconf
+        if zeroconf is not None:
+            _LOGGER.info("Stopping Zeroconf service...")
+            await zeroconf.async_stop()
+            _LOGGER.info("Zeroconf service stopped")
 
 
 if __name__ == "__main__":
