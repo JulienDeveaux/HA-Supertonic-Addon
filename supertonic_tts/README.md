@@ -10,7 +10,8 @@ This add-on brings Supertonic2 TTS to Home Assistant, providing:
 - **Complete privacy** - 100% on-device processing
 - **Multilingual support** - English, French, Spanish, Portuguese, Korean
 - **10 voice options** - 5 male and 5 female voices
-- **Zero latency** - No network dependency
+- **Streaming** - Playback starts on the first sentence, no waiting for the full text
+- **Smart abbreviations** - FR/EN abbreviations expanded to spoken form before synthesis
 
 Perfect for home automation announcements, notifications, and accessibility features.
 

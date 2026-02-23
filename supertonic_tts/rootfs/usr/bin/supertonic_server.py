@@ -74,14 +74,20 @@ _ABBREV_EXPAND_BY_LANG = {
     "en": _ABBREV_EXPAND_EN,
 }
 
-# Pre-compile one regex per language (word boundary + abbreviation + dot)
+# Pre-compile one regex per language (word boundary + abbreviation + dot, case-insensitive)
 def _build_abbrev_re(expand_map: dict):
     keys = sorted(expand_map.keys(), key=len, reverse=True)
     pattern = '|'.join(r'\b' + re.escape(k) for k in keys)
-    return re.compile(pattern)
+    return re.compile(pattern, re.IGNORECASE)
 
 _ABBREV_RE_BY_LANG = {
     lang: _build_abbrev_re(expand_map)
+    for lang, expand_map in _ABBREV_EXPAND_BY_LANG.items()
+}
+
+# Lowercase lookup dicts — used in _replace to resolve matches case-insensitively
+_ABBREV_LOWER_BY_LANG = {
+    lang: {k.lower(): v for k, v in expand_map.items()}
     for lang, expand_map in _ABBREV_EXPAND_BY_LANG.items()
 }
 
@@ -97,10 +103,12 @@ def expand_abbreviations(text: str, language: str) -> str:
     if expand_map is None or abbrev_re is None:
         return text
 
+    lower_map = _ABBREV_LOWER_BY_LANG[language]
+
     def _replace(m: re.Match) -> str:
         matched = m.group(0)
+        expansion = lower_map.get(matched.lower(), matched)
         # Preserve capitalisation: if original starts with uppercase, capitalise expansion
-        expansion = expand_map[matched] if matched in expand_map else expand_map.get(matched.lower(), matched)
         if matched[0].isupper():
             return expansion[0].upper() + expansion[1:]
         return expansion

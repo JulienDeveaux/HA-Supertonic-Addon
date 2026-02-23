@@ -14,6 +14,8 @@ This add-on provides a local, privacy-focused text-to-speech service using Super
 - **🔒 100% Private**: Completely on-device, no cloud, no API calls
 - **🌍 Multilingual**: Supports English, French, Spanish, Portuguese, and Korean
 - **🎤 Multiple Voices**: 10 voice options (5 male, 5 female)
+- **⚡ Streaming**: Audio playback starts as soon as the first sentence is ready, reducing perceived latency on long texts
+- **🗣️ Smart abbreviations**: Common abbreviations (FR/EN) are automatically expanded to their spoken form before synthesis (e.g. `Dr.` → `Docteur`, `Mme.` → `Madame`)
 - **⚡ Low Latency**: Zero network latency
 - **🎛️ Highly Configurable**: Adjust speed, volume, quality, and voice
 - **🔌 Auto-Discovery**: Automatically detected by Home Assistant via Wyoming protocol
@@ -27,10 +29,6 @@ This add-on provides a local, privacy-focused text-to-speech service using Super
 5. **That's it!** Home Assistant will automatically discover the TTS service
 
 ## Configuration
-
-### Add-on Configuration
-
-Configure the default TTS settings in the add-on configuration:
 
 ```yaml
 default_language: "fr"      # Default language (en, fr, es, pt, ko)
@@ -95,6 +93,12 @@ Voices are named with the format: `language_voice` (e.g., `fr_M4`, `en_F2`)
 - `1-3` - Lower quality, faster generation
 - `5` - Balanced quality/speed (recommended)
 - `8-10` - Highest quality, slower generation
+
+## How Streaming Works
+
+Long texts are automatically split into sentences before synthesis. Each sentence is synthesized and streamed to Home Assistant immediately — playback begins as soon as the first sentence is ready, while subsequent sentences are generated in parallel. This significantly reduces the perceived response time on announcements longer than one sentence.
+
+Abbreviation expansion (FR/EN only) happens before splitting, so `"M. Dupont est Dr. en médecine."` is synthesized as `"Monsieur Dupont est Docteur en médecine."`.
 
 ## Backup Configuration
 
