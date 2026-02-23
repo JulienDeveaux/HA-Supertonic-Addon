@@ -26,10 +26,95 @@ sys.path.insert(0, SUPERTONIC_PATH)
 from helper import load_text_to_speech, load_voice_style
 
 
-def split_into_sentences(text: str, max_len: int = 250) -> list:
-    """Split text into chunks on sentence boundaries, each under max_len chars."""
+# Abbreviation expansion maps — longest keys first to avoid partial matches
+# Each entry: (abbrev_with_dot, case_sensitive) → full word
+# Sorted by length descending at build time so "Mme." is replaced before "M."
+_ABBREV_EXPAND_FR = {
+    "Mlle.": "Mademoiselle",
+    "Mgr.":  "Monseigneur",
+    "Mme.":  "Madame",
+    "Pr.":   "Professeur",
+    "Me.":   "Maître",
+    "Ste.":  "Sainte",
+    "St.":   "Saint",
+    "Dr.":   "Docteur",
+    "M.":    "Monsieur",
+    "vol.":  "volume",
+    "art.":  "article",
+    "fig.":  "figure",
+    "env.":  "environ",
+    "hab.":  "habitants",
+    "cf.":   "voir",
+    "vs.":   "versus",
+    "etc.":  "et cetera",
+    "p.":    "page",
+}
+
+_ABBREV_EXPAND_EN = {
+    "Prof.":   "Professor",
+    "Dept.":   "Department",
+    "Blvd.":   "Boulevard",
+    "approx.": "approximately",
+    "Mrs.":    "Missus",
+    "Ave.":    "Avenue",
+    "Fig.":    "Figure",
+    "Mr.":     "Mister",
+    "Ms.":     "Miss",
+    "Dr.":     "Doctor",
+    "Sr.":     "Senior",
+    "Jr.":     "Junior",
+    "St.":     "Saint",
+    "vs.":     "versus",
+    "etc.":    "et cetera",
+    "no.":     "number",
+}
+
+_ABBREV_EXPAND_BY_LANG = {
+    "fr": _ABBREV_EXPAND_FR,
+    "en": _ABBREV_EXPAND_EN,
+}
+
+# Pre-compile one regex per language (word boundary + abbreviation + dot)
+def _build_abbrev_re(expand_map: dict):
+    keys = sorted(expand_map.keys(), key=len, reverse=True)
+    pattern = '|'.join(r'\b' + re.escape(k) for k in keys)
+    return re.compile(pattern)
+
+_ABBREV_RE_BY_LANG = {
+    lang: _build_abbrev_re(expand_map)
+    for lang, expand_map in _ABBREV_EXPAND_BY_LANG.items()
+}
+
+
+def expand_abbreviations(text: str, language: str) -> str:
+    """Replace abbreviations with their full spoken form for a given language.
+
+    e.g. (FR) "M. Dupont est Dr. en médecine." → "Monsieur Dupont est Docteur en médecine."
+         (EN) "Dr. Smith works on Ave. 5."     → "Doctor Smith works on Avenue 5."
+    """
+    expand_map = _ABBREV_EXPAND_BY_LANG.get(language)
+    abbrev_re  = _ABBREV_RE_BY_LANG.get(language)
+    if expand_map is None or abbrev_re is None:
+        return text
+
+    def _replace(m: re.Match) -> str:
+        matched = m.group(0)
+        # Preserve capitalisation: if original starts with uppercase, capitalise expansion
+        expansion = expand_map[matched] if matched in expand_map else expand_map.get(matched.lower(), matched)
+        if matched[0].isupper():
+            return expansion[0].upper() + expansion[1:]
+        return expansion
+
+    return abbrev_re.sub(_replace, text)
+
+
+def split_into_sentences(text: str, language: str = "fr", max_len: int = 250) -> list:
+    """Expand abbreviations then split on sentence boundaries, each chunk under max_len chars."""
+    # Expand abbreviations so periods inside them no longer trigger splits
+    expanded = expand_abbreviations(text.strip(), language)
+
     # Split on sentence-ending punctuation followed by whitespace
-    raw = re.split(r'(?<=[.!?;])\s+', text.strip())
+    raw = re.split(r'(?<=[.!?;])\s+', expanded)
 
     result = []
     for sentence in raw:
@@ -52,7 +137,7 @@ def split_into_sentences(text: str, max_len: int = 250) -> list:
         else:
             result.append(sentence)
 
-    return result if result else [text]
+    return result if result else [expanded] if expanded else []
 
 # Configure logging
 _LOGGER = logging.getLogger(__name__)
@@ -148,8 +233,8 @@ class SupertonicEventHandler(AsyncEventHandler):
 
         style = self.voice_styles[voice_name]
 
-        # Split text into sentences for streaming
-        sentences = split_into_sentences(text)
+        # Expand abbreviations and split text into sentences for streaming
+        sentences = split_into_sentences(text, language=language)
         _LOGGER.info("Synthesizing %d sentence(s): text='%s...' lang=%s voice=%s",
                      len(sentences), text[:50], language, voice_name)
 
