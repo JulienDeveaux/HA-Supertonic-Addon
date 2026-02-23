@@ -7,26 +7,52 @@ Provides text-to-speech via Wyoming protocol for automatic discovery
 import argparse
 import asyncio
 import logging
-import os
+import re
 import sys
-import tempfile
 from functools import partial
 from pathlib import Path
 
 import numpy as np
-import soundfile as sf
-
+from wyoming.audio import AudioChunk, AudioStop
+from wyoming.event import Event
 from wyoming.info import Attribution, Describe, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer, AsyncEventHandler
 from wyoming.tts import Synthesize
-from wyoming.audio import AudioChunk, AudioStop
-from wyoming.event import Event
 
 # Add supertonic to path
 SUPERTONIC_PATH = "/opt/supertonic/py"
 sys.path.insert(0, SUPERTONIC_PATH)
 
 from helper import load_text_to_speech, load_voice_style
+
+
+def split_into_sentences(text: str, max_len: int = 250) -> list:
+    """Split text into chunks on sentence boundaries, each under max_len chars."""
+    # Split on sentence-ending punctuation followed by whitespace
+    raw = re.split(r'(?<=[.!?;])\s+', text.strip())
+
+    result = []
+    for sentence in raw:
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        # If still too long, split on commas
+        if len(sentence) > max_len:
+            sub_parts = re.split(r'(?<=,)\s+', sentence)
+            current = ""
+            for part in sub_parts:
+                if len(current) + len(part) + 1 <= max_len:
+                    current = (current + " " + part).strip() if current else part
+                else:
+                    if current:
+                        result.append(current)
+                    current = part
+            if current:
+                result.append(current)
+        else:
+            result.append(sentence)
+
+    return result if result else [text]
 
 # Configure logging
 _LOGGER = logging.getLogger(__name__)
@@ -93,7 +119,7 @@ class SupertonicEventHandler(AsyncEventHandler):
             return True
 
     async def _handle_synthesize(self, synthesize: Synthesize):
-        """Handle a TTS synthesis request"""
+        """Handle a TTS synthesis request with sentence-level streaming."""
         text = synthesize.text
 
         # Get voice name - synthesize.voice is a SynthesizeVoice object
@@ -110,72 +136,79 @@ class SupertonicEventHandler(AsyncEventHandler):
             language = self.config.get("default_language", "fr")
             voice_name = voice
 
-        _LOGGER.info("Synthesizing: text='%s...', lang=%s, voice=%s",
-                     text[:50], language, voice_name)
+        # Get parameters
+        speed = self.config.get("speed", 1.5)
+        volume = self.config.get("volume_boost", 2.0)
+        quality = self.config.get("quality", 5)
 
-        try:
-            # Get parameters
-            speed = self.config.get("speed", 1.5)
-            volume = self.config.get("volume_boost", 2.0)
-            quality = self.config.get("quality", 5)
+        # Get voice style
+        if voice_name not in self.voice_styles:
+            _LOGGER.warning("Voice %s not found, using default", voice_name)
+            voice_name = self.config.get("default_voice", "M4")
 
-            # Get voice style
-            if voice_name not in self.voice_styles:
-                _LOGGER.warning("Voice %s not found, using default", voice_name)
-                voice_name = self.config.get("default_voice", "M4")
+        style = self.voice_styles[voice_name]
 
-            style = self.voice_styles[voice_name]
+        # Split text into sentences for streaming
+        sentences = split_into_sentences(text)
+        _LOGGER.info("Synthesizing %d sentence(s): text='%s...' lang=%s voice=%s",
+                     len(sentences), text[:50], language, voice_name)
 
-            # Generate speech
-            wav, duration = self.tts_engine(
-                text=text,
-                lang=language,
-                style=style,
-                total_step=int(quality),
-                speed=float(speed)
-            )
+        loop = asyncio.get_event_loop()
 
-            # Extract duration value
-            duration_val = float(duration[0]) if hasattr(duration, '__len__') else float(duration)
+        for idx, sentence in enumerate(sentences):
+            if not sentence.strip():
+                continue
+            try:
+                _LOGGER.debug("Synthesizing sentence %d/%d: '%s'", idx + 1, len(sentences), sentence[:60])
 
-            # Trim to actual duration
-            trim_samples = int(self.tts_engine.sample_rate * duration_val)
-            wav_trimmed = wav[0, :trim_samples]
-
-            # Apply volume boost
-            wav_boosted = wav_trimmed * float(volume)
-
-            # Clip to prevent distortion
-            wav_boosted = np.clip(wav_boosted, -1.0, 1.0)
-
-            # Convert to int16 for Wyoming
-            wav_int16 = (wav_boosted * 32767).astype(np.int16)
-
-            _LOGGER.info("Generated audio: duration=%.2fs, samples=%d",
-                        duration_val, len(wav_int16))
-
-            # Send audio in chunks using AsyncEventHandler's write_event method
-            chunk_size = 1024
-            for i in range(0, len(wav_int16), chunk_size):
-                chunk = wav_int16[i:i + chunk_size]
-                chunk_bytes = chunk.tobytes()
-
-                await self.write_event(
-                    AudioChunk(
-                        rate=self.tts_engine.sample_rate,
-                        width=2,  # 16-bit
-                        channels=1,  # mono
-                        audio=chunk_bytes
-                    ).event()
+                # Run blocking TTS in thread pool to avoid blocking the event loop
+                wav, duration = await loop.run_in_executor(
+                    None,
+                    lambda s=sentence: self.tts_engine(
+                        text=s,
+                        lang=language,
+                        style=style,
+                        total_step=int(quality),
+                        speed=float(speed),
+                    )
                 )
 
-            # Signal completion
-            await self.write_event(AudioStop().event())
+                # Extract duration value
+                duration_val = float(duration[0]) if hasattr(duration, '__len__') else float(duration)
 
-        except Exception as e:
-            _LOGGER.error("TTS synthesis failed: %s", e, exc_info=True)
-            # Send stop event to signal error
-            await self.write_event(AudioStop().event())
+                # Trim to actual duration
+                trim_samples = int(self.tts_engine.sample_rate * duration_val)
+                wav_trimmed = wav[0, :trim_samples]
+
+                # Apply volume boost and clip to prevent distortion
+                wav_boosted = np.clip(wav_trimmed * float(volume), -1.0, 1.0)
+
+                # Convert to int16 for Wyoming
+                wav_int16 = (wav_boosted * 32767).astype(np.int16)
+
+                _LOGGER.debug("Sentence %d/%d: duration=%.2fs, samples=%d — streaming now",
+                              idx + 1, len(sentences), duration_val, len(wav_int16))
+
+                # Stream audio chunks immediately (don't wait for remaining sentences)
+                chunk_size = 1024
+                for i in range(0, len(wav_int16), chunk_size):
+                    chunk_bytes = wav_int16[i:i + chunk_size].tobytes()
+                    await self.write_event(
+                        AudioChunk(
+                            rate=self.tts_engine.sample_rate,
+                            width=2,   # 16-bit
+                            channels=1,  # mono
+                            audio=chunk_bytes,
+                        ).event()
+                    )
+
+            except Exception as e:
+                _LOGGER.error("TTS synthesis failed on sentence %d: %s", idx + 1, e, exc_info=True)
+                await self.write_event(AudioStop().event())
+                return
+
+        # Signal completion after all sentences
+        await self.write_event(AudioStop().event())
 
 
 
