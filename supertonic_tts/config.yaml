@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
 name: Supertonic2 TTS
-version: "1.0.1"
+version: "1.1.0"
 slug: supertonic_tts
 description: Ultra-fast, on-device text-to-speech powered by Supertonic2 with multilingual support
 url: "https://github.com/JulienDeveaux/HA-Supertonic-Addon"
