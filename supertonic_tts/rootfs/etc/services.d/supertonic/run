@@ -1,9 +1,9 @@
 #!/usr/bin/with-contenv bashio
 # ==============================================================================
-# Start the Supertonic2 TTS Wyoming Server
+# Start the Supertonic3 TTS Wyoming Server
 # ==============================================================================
 
-bashio::log.info "Starting Supertonic2 TTS Wyoming Server..."
+bashio::log.info "Starting Supertonic3 TTS Wyoming Server..."
 
 # Get configuration
 DEFAULT_LANG=$(bashio::config 'default_language')
@@ -18,7 +18,7 @@ bashio::log.info "  Default Language: ${DEFAULT_LANG}"
 bashio::log.info "  Default Voice: ${DEFAULT_VOICE}"
 bashio::log.info "  Speed: ${SPEED}x"
 bashio::log.info "  Volume Boost: ${VOLUME}x"
-bashio::log.info "  Quality: ${QUALITY}/10"
+bashio::log.info "  Quality (total_steps): ${QUALITY}"
 bashio::log.info "  Wyoming Protocol: tcp://0.0.0.0:10300"
 
 # Get the addon's hostname for Wyoming discovery
@@ -30,7 +30,7 @@ bashio::log.info "  Wyoming will advertise as: ${HOSTNAME}.local:10300"
 ARGS=(
     --uri "tcp://0.0.0.0:10300"
     --data-dir "/data"
-    --models-dir "/opt/supertonic/models"
+    --models-dir "/opt/supertonic-models"
     --zeroconf
 )
 

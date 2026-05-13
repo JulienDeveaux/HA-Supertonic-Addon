@@ -14,7 +14,7 @@ configuration:
     description: 오디오 볼륨 증폭 (1.0 = 증폭 없음, 2.0 = 두 배 볼륨)
   quality:
     name: 품질 수준
-    description: 음성 합성 품질 수준 (1 = 가장 빠름/가장 낮음, 10 = 가장 느림/가장 높음)
+    description: 음성 합성을 위한 디퓨전 단계 수 (2 = 가장 빠름/가장 낮음, 16 = 가장 느림/가장 높음)
   debug_logging:
     name: 디버그 로깅
     description: 문제 해결을 위한 상세한 디버그 로깅 활성화

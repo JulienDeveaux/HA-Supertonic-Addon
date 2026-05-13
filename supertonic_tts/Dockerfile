@@ -1,66 +1,44 @@
 # https://developers.home-assistant.io/docs/add-ons/configuration#add-on-dockerfile
-ARG BUILD_FROM=homeassistant/amd64-base-debian:bookworm
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm
 FROM $BUILD_FROM
 
-# Set working directory
 WORKDIR /opt
 
-# Install system dependencies for Debian
+# Runtime deps only — onnxruntime wheels ship precompiled, no compiler needed
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
     python3-venv \
-    python3-dev \
-    git \
-    git-lfs \
     libsndfile1 \
-    libsndfile1-dev \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Create python virtual environment
 RUN python3 -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Upgrade pip
-RUN pip install --no-cache-dir --upgrade pip
+# Pin SDK version: the migration relies on the current TTS(model_dir=...) API
+# and the SDK's hardcoded ~/.cache/supertonic3 download path. A breaking SDK
+# change would silently break rebuilds — re-test before bumping these.
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir \
+      'supertonic>=1.2.1,<2.0' \
+      'wyoming>=1.5.0' \
+      'zeroconf>=0.132.0'
 
-# Install Python dependencies
-# onnxruntime works on Debian (has manylinux wheels)
-RUN pip install --no-cache-dir \
-    onnxruntime>=1.19.0 \
-    numpy>=1.26.0 \
-    soundfile>=0.12.0 \
-    librosa>=0.10.0 \
-    pyyaml>=6.0 \
-    wyoming>=1.5.0 \
-    zeroconf>=0.132.0
+# Pre-download Supertonic-3 model at build time and relocate to a stable path.
+# The SDK hardcodes ~/.cache/supertonic3 for downloads (SUPERTONIC_CACHE_DIR is
+# only half-respected). We resolve the actual cache directory via the SDK itself
+# (in case it changes in a future patch) and move it to /opt/supertonic-models.
+RUN python3 -c "from supertonic import TTS; TTS(model='supertonic-3', auto_download=True)" && \
+    SRC=$(python3 -c "from supertonic.loader import get_model_cache_dir; print(get_model_cache_dir('supertonic-3'))") && \
+    test -d "$SRC/onnx" || (echo "ERROR: unexpected SDK cache layout at $SRC" && exit 1) && \
+    mv "$SRC" /opt/supertonic-models && \
+    ls -la /opt/supertonic-models/onnx && \
+    ls -la /opt/supertonic-models/voice_styles
 
-# Clone Supertonic repository (for helper code)
-RUN git clone --depth 1 https://github.com/supertone-inc/supertonic.git /opt/supertonic
-
-# Initialize Git LFS and download Supertonic2 models
-RUN git lfs install && \
-    git clone https://huggingface.co/Supertone/supertonic-2 /opt/supertonic/models
-
-# Clean up git files to save space (keep only models)
-RUN cd /opt/supertonic/models && \
-    rm -rf .git && \
-    cd /opt && \
-    cd /opt/supertonic && \
-    rm -rf .git cpp csharp flutter go img ios java nodejs rust swift web && \
-    rm -rf py/.git py/__pycache__ py/results
-
-# Verify models are present
-RUN ls -la /opt/supertonic/models/onnx && \
-    ls -la /opt/supertonic/models/voice_styles
-
-# Copy root filesystem
 COPY rootfs /
 
-# Labels
 LABEL \
-    io.hass.name="Supertonic2 TTS" \
-    io.hass.description="Ultra-fast, on-device multilingual text-to-speech" \
+    io.hass.name="Supertonic3 TTS" \
+    io.hass.description="Ultra-fast, on-device multilingual text-to-speech (Supertonic-3)" \
     io.hass.type="addon" \
-    io.hass.version="1.0.0"
+    io.hass.version="2.0.0"

@@ -14,7 +14,7 @@ configuration:
     description: Amplification du volume audio (1.0 = pas d'amplification, 2.0 = double volume)
   quality:
     name: Niveau de qualité
-    description: Niveau de qualité pour la synthèse vocale (1 = le plus rapide/le plus bas, 10 = le plus lent/le plus élevé)
+    description: Nombre d'étapes de diffusion pour la synthèse vocale (2 = le plus rapide/le plus bas, 16 = le plus lent/le plus élevé)
   debug_logging:
     name: Journalisation de débogage
     description: Activer la journalisation détaillée pour le dépannage

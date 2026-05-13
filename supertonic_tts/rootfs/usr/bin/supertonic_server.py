@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Supertonic2 TTS Wyoming Server for Home Assistant
+Supertonic3 TTS Wyoming Server for Home Assistant
 Provides text-to-speech via Wyoming protocol for automatic discovery
 """
 
@@ -19,11 +19,7 @@ from wyoming.info import Attribution, Describe, Info, TtsProgram, TtsVoice
 from wyoming.server import AsyncServer, AsyncEventHandler
 from wyoming.tts import Synthesize
 
-# Add supertonic to path
-SUPERTONIC_PATH = "/opt/supertonic/py"
-sys.path.insert(0, SUPERTONIC_PATH)
-
-from helper import load_text_to_speech, load_voice_style
+from supertonic import TTS
 
 
 # Abbreviation expansion maps — longest keys first to avoid partial matches
@@ -150,13 +146,42 @@ def split_into_sentences(text: str, language: str = "fr", max_len: int = 250) ->
 # Configure logging
 _LOGGER = logging.getLogger(__name__)
 
-# Available languages and voices
+# Available languages and voices.
+# Supertonic-3 supports 31 ISO codes plus the SDK's "na" UNKNOWN_LANGUAGE fallback.
+# 'na' is accepted as default_language for unknown text but is not advertised as
+# a Wyoming voice (310 voices is already large enough for HA's UI).
 SUPPORTED_LANGUAGES = {
     "en": "English",
     "fr": "French",
     "es": "Spanish",
     "pt": "Portuguese",
-    "ko": "Korean"
+    "ko": "Korean",
+    "ja": "Japanese",
+    "ar": "Arabic",
+    "bg": "Bulgarian",
+    "cs": "Czech",
+    "da": "Danish",
+    "de": "German",
+    "el": "Greek",
+    "et": "Estonian",
+    "fi": "Finnish",
+    "hi": "Hindi",
+    "hr": "Croatian",
+    "hu": "Hungarian",
+    "id": "Indonesian",
+    "it": "Italian",
+    "lt": "Lithuanian",
+    "lv": "Latvian",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "ro": "Romanian",
+    "ru": "Russian",
+    "sk": "Slovak",
+    "sl": "Slovenian",
+    "sv": "Swedish",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
+    "vi": "Vietnamese",
 }
 
 SUPPORTED_VOICES = {
@@ -174,24 +199,28 @@ SUPPORTED_VOICES = {
 
 
 class SupertonicEventHandler(AsyncEventHandler):
-    """Handle Wyoming protocol events for Supertonic2 TTS"""
+    """Handle Wyoming protocol events for Supertonic3 TTS"""
 
     def __init__(
         self,
         wyoming_info: Info,
         cli_args: argparse.Namespace,
-        tts_engine,
+        tts,
         voice_styles: dict,
         config: dict,
+        synth_lock: asyncio.Lock,
         *args,
         **kwargs
     ) -> None:
         super().__init__(*args, **kwargs)
         self.wyoming_info = wyoming_info
         self.cli_args = cli_args
-        self.tts_engine = tts_engine
+        self.tts = tts
         self.voice_styles = voice_styles
         self.config = config
+        # ONNX Runtime sessions are not safe to call concurrently from multiple
+        # threads. We serialize synthesize() across handlers with a shared lock.
+        self.synth_lock = synth_lock
 
     async def handle_event(self, event: Event) -> bool:
         """Handle a Wyoming protocol event"""
@@ -246,7 +275,7 @@ class SupertonicEventHandler(AsyncEventHandler):
         _LOGGER.info("Synthesizing %d sentence(s): text='%s...' lang=%s voice=%s",
                      len(sentences), text[:50], language, voice_name)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         for idx, sentence in enumerate(sentences):
             if not sentence.strip():
@@ -254,24 +283,28 @@ class SupertonicEventHandler(AsyncEventHandler):
             try:
                 _LOGGER.debug("Synthesizing sentence %d/%d: '%s'", idx + 1, len(sentences), sentence[:60])
 
-                # Run blocking TTS in thread pool to avoid blocking the event loop
-                wav, duration = await loop.run_in_executor(
-                    None,
-                    lambda s=sentence: self.tts_engine(
-                        text=s,
-                        lang=language,
-                        style=style,
-                        total_step=int(quality),
-                        speed=float(speed),
+                # Run blocking TTS in thread pool to avoid blocking the event loop.
+                # Lock serializes ONNX Runtime calls across concurrent Wyoming clients.
+                async with self.synth_lock:
+                    wav, duration = await loop.run_in_executor(
+                        None,
+                        lambda s=sentence: self.tts.synthesize(
+                            text=s,
+                            voice_style=style,
+                            lang=language,
+                            total_steps=int(quality),
+                            speed=float(speed),
+                        )
                     )
-                )
 
                 # Extract duration value
                 duration_val = float(duration[0]) if hasattr(duration, '__len__') else float(duration)
 
-                # Trim to actual duration
-                trim_samples = int(self.tts_engine.sample_rate * duration_val)
-                wav_trimmed = wav[0, :trim_samples]
+                # Trim to actual duration. SDK currently returns (1, N) but we
+                # defensively normalize so a future 1D return won't IndexError.
+                trim_samples = int(self.tts.sample_rate * duration_val)
+                wav_2d = np.atleast_2d(wav)
+                wav_trimmed = wav_2d[0, :trim_samples]
 
                 # Apply volume boost and clip to prevent distortion
                 wav_boosted = np.clip(wav_trimmed * float(volume), -1.0, 1.0)
@@ -288,7 +321,7 @@ class SupertonicEventHandler(AsyncEventHandler):
                     chunk_bytes = wav_int16[i:i + chunk_size].tobytes()
                     await self.write_event(
                         AudioChunk(
-                            rate=self.tts_engine.sample_rate,
+                            rate=self.tts.sample_rate,
                             width=2,   # 16-bit
                             channels=1,  # mono
                             audio=chunk_bytes,
@@ -296,9 +329,11 @@ class SupertonicEventHandler(AsyncEventHandler):
                     )
 
             except Exception as e:
-                _LOGGER.error("TTS synthesis failed on sentence %d: %s", idx + 1, e, exc_info=True)
-                await self.write_event(AudioStop().event())
-                return
+                # Don't abort the whole announcement on a single bad sentence:
+                # keep streaming what we have so the user at least hears the rest.
+                _LOGGER.error("TTS synthesis failed on sentence %d/%d (continuing): %s",
+                              idx + 1, len(sentences), e, exc_info=True)
+                continue
 
         # Signal completion after all sentences
         await self.write_event(AudioStop().event())
@@ -307,7 +342,7 @@ class SupertonicEventHandler(AsyncEventHandler):
 
 async def main():
     """Main entry point"""
-    parser = argparse.ArgumentParser(description="Supertonic2 TTS Wyoming Server")
+    parser = argparse.ArgumentParser(description="Supertonic3 TTS Wyoming Server")
     parser.add_argument(
         "--uri",
         default="tcp://0.0.0.0:10300",
@@ -320,8 +355,8 @@ async def main():
     )
     parser.add_argument(
         "--models-dir",
-        default="/opt/supertonic/models",
-        help="Directory containing Supertonic2 models",
+        default="/opt/supertonic-models",
+        help="Directory containing Supertonic-3 ONNX models and voice styles",
     )
     parser.add_argument(
         "--zeroconf",
@@ -342,7 +377,7 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    _LOGGER.info("=== Supertonic2 TTS Wyoming Server Starting ===")
+    _LOGGER.info("=== Supertonic3 TTS Wyoming Server Starting ===")
 
     # Load configuration
     config = {}
@@ -363,24 +398,26 @@ async def main():
         }
         _LOGGER.info("Using default configuration")
 
-    # Initialize TTS engine
-    onnx_dir = Path(args.models_dir) / "onnx"
-    voices_dir = Path(args.models_dir) / "voice_styles"
-
-    _LOGGER.info("Loading TTS engine from %s", onnx_dir)
-    tts_engine = load_text_to_speech(onnx_dir=str(onnx_dir), use_gpu=False)
-    _LOGGER.info("TTS engine loaded (sample rate: %d Hz)", tts_engine.sample_rate)
+    # Initialize TTS engine via Supertonic SDK.
+    # We pass model_dir explicitly because the SDK's get_model_cache_dir() ignores
+    # SUPERTONIC_CACHE_DIR; the addon image pre-downloads models to /opt/supertonic-models.
+    _LOGGER.info("Loading Supertonic-3 TTS engine from %s", args.models_dir)
+    tts = TTS(
+        model="supertonic-3",
+        model_dir=args.models_dir,
+        auto_download=False,
+    )
+    _LOGGER.info("TTS engine loaded (sample rate: %d Hz)", tts.sample_rate)
 
     # Pre-load all voice styles
     voice_styles = {}
-    _LOGGER.info("Loading voice styles from %s", voices_dir)
-    for voice_id in SUPPORTED_VOICES.keys():
-        voice_path = voices_dir / f"{voice_id}.json"
-        if voice_path.exists():
-            voice_styles[voice_id] = load_voice_style([str(voice_path)])
+    _LOGGER.info("Loading voice styles")
+    for voice_id in SUPPORTED_VOICES:
+        try:
+            voice_styles[voice_id] = tts.get_voice_style(voice_name=voice_id)
             _LOGGER.info("  ✓ Loaded voice: %s", voice_id)
-        else:
-            _LOGGER.warning("  ✗ Voice file not found: %s", voice_path)
+        except Exception as e:
+            _LOGGER.warning("  ✗ Failed to load voice %s: %s", voice_id, e)
 
     _LOGGER.info("Loaded %d voice styles", len(voice_styles))
 
@@ -397,7 +434,7 @@ async def main():
                         url="https://github.com/supertone-inc/supertonic",
                     ),
                     installed=True,
-                    version="2.0.0",
+                    version="3.0.0",
                     languages=[lang_code],
                 )
             )
@@ -405,14 +442,14 @@ async def main():
     wyoming_info = Info(
         tts=[
             TtsProgram(
-                name="supertonic2",
-                description="Supertonic2 - Ultra-fast, on-device multilingual TTS",
+                name="supertonic3",
+                description="Supertonic3 - Ultra-fast, on-device multilingual TTS",
                 attribution=Attribution(
                     name="Supertone Inc.",
                     url="https://github.com/supertone-inc/supertonic",
                 ),
                 installed=True,
-                version="2.0.0",
+                version="3.0.0",
                 voices=voices,
             )
         ],
@@ -446,14 +483,18 @@ async def main():
         # Start server in a way that allows us to also run Zeroconf
         # We need to start Zeroconf AFTER the server starts listening
 
+        # Shared lock to serialize ONNX synthesis across concurrent Wyoming clients
+        synth_lock = asyncio.Lock()
+
         # Create the event handler factory
         handler_factory = partial(
             SupertonicEventHandler,
             wyoming_info,
             args,
-            tts_engine,
+            tts,
             voice_styles,
             config,
+            synth_lock,
         )
 
         # Start Zeroconf registration if requested
@@ -477,7 +518,7 @@ async def main():
                     local_ip = "0.0.0.0"
                     local_ip_bytes = sock.inet_aton(local_ip)
 
-                service_name = "Supertonic2 TTS._wyoming._tcp.local."
+                service_name = "Supertonic3 TTS._wyoming._tcp.local."
                 service_type = "_wyoming._tcp.local."
 
                 service_info = ServiceInfo(
@@ -486,8 +527,8 @@ async def main():
                     addresses=[local_ip_bytes],
                     port=port,
                     properties={
-                        "name": "Supertonic2 TTS",
-                        "program": "supertonic2",
+                        "name": "Supertonic3 TTS",
+                        "program": "supertonic3",
                         "domain": "tts",
                     },
                     server=f"{hostname}.local.",
@@ -498,7 +539,7 @@ async def main():
 
                 _LOGGER.info("Wyoming service registered on mDNS:")
                 _LOGGER.info("  - Service: %s", service_type)
-                _LOGGER.info("  - Name: Supertonic2 TTS")
+                _LOGGER.info("  - Name: Supertonic3 TTS")
                 _LOGGER.info("  - Host: %s (%s.local)", local_ip, hostname)
                 _LOGGER.info("  - Port: %d", port)
                 _LOGGER.info("Zeroconf/mDNS: ENABLED ✓")
