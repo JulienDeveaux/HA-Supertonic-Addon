@@ -297,17 +297,15 @@ class SupertonicEventHandler(AsyncEventHandler):
                         )
                     )
 
-                # Extract duration value
+                # Use the full wav buffer returned by the SDK — trimming to
+                # the reported `duration` clipped consonant decay in v2's
+                # legacy path; the v3 SDK does not need it.
                 duration_val = float(duration[0]) if hasattr(duration, '__len__') else float(duration)
-
-                # Trim to actual duration. SDK currently returns (1, N) but we
-                # defensively normalize so a future 1D return won't IndexError.
-                trim_samples = int(self.tts.sample_rate * duration_val)
                 wav_2d = np.atleast_2d(wav)
-                wav_trimmed = wav_2d[0, :trim_samples]
+                wav_full = wav_2d[0]
 
                 # Apply volume boost and clip to prevent distortion
-                wav_boosted = np.clip(wav_trimmed * float(volume), -1.0, 1.0)
+                wav_boosted = np.clip(wav_full * float(volume), -1.0, 1.0)
 
                 # Convert to int16 for Wyoming
                 wav_int16 = (wav_boosted * 32767).astype(np.int16)
@@ -334,6 +332,25 @@ class SupertonicEventHandler(AsyncEventHandler):
                 _LOGGER.error("TTS synthesis failed on sentence %d/%d (continuing): %s",
                               idx + 1, len(sentences), e, exc_info=True)
                 continue
+
+        # Pad with 500ms of trailing silence before AudioStop. Many media
+        # players truncate playback on AudioStop while their audio queue is
+        # still draining, which clips the last 100–500ms of the final phrase.
+        # The variability comes from the player's queue state, not from our
+        # buffer — we always stream the full wav. The silence gives the player
+        # a "decoy" tail to consume so the actual speech finishes before any
+        # truncation.
+        _TAIL_PAD_S = 0.5
+        tail_pad = np.zeros(int(self.tts.sample_rate * _TAIL_PAD_S), dtype=np.int16)
+        for i in range(0, len(tail_pad), 1024):
+            await self.write_event(
+                AudioChunk(
+                    rate=self.tts.sample_rate,
+                    width=2,
+                    channels=1,
+                    audio=tail_pad[i:i + 1024].tobytes(),
+                ).event()
+            )
 
         # Signal completion after all sentences
         await self.write_event(AudioStop().event())
