@@ -283,12 +283,20 @@ class SupertonicEventHandler(AsyncEventHandler):
             try:
                 _LOGGER.debug("Synthesizing sentence %d/%d: '%s'", idx + 1, len(sentences), sentence[:60])
 
+                # Workaround for Supertonic-3 Duration Predictor under-allocation:
+                # on some short phrases the model predicts a buffer too small for
+                # the actual speech and clips the last word. Appending extra
+                # periods forces the predictor to allocate ~480ms more room — the
+                # periods are rendered as a brief silent pause, not as audible
+                # sound.
+                padded_text = sentence + "...."
+
                 # Run blocking TTS in thread pool to avoid blocking the event loop.
                 # Lock serializes ONNX Runtime calls across concurrent Wyoming clients.
                 async with self.synth_lock:
                     wav, duration = await loop.run_in_executor(
                         None,
-                        lambda s=sentence: self.tts.synthesize(
+                        lambda s=padded_text: self.tts.synthesize(
                             text=s,
                             voice_style=style,
                             lang=language,
